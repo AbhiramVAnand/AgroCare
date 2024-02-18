@@ -2,20 +2,37 @@ package com.abhiram.agrocare.viewmodels
 
 import android.app.Application
 import android.util.Log
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.abhiram.agrocare.data.repository.PreferencesRepo
+import com.abhiram.agrocare.data.room.AlertEvent
+import com.abhiram.agrocare.data.room.AlertState
+import com.abhiram.agrocare.data.room.Alerts
+import com.abhiram.agrocare.data.room.AppDao
+import com.hivemq.client.mqtt.MqttClientState
 import com.hivemq.client.mqtt.MqttGlobalPublishFilter
 import com.hivemq.client.mqtt.mqtt5.Mqtt5Client
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.nio.charset.StandardCharsets
+import java.text.SimpleDateFormat
+import java.util.Date
 import javax.inject.Inject
-import javax.inject.Singleton
 
 @HiltViewModel
 class MQTTClientViewModel @Inject constructor(
     appContext : Application,
-    preferenceRepo : PreferencesRepo
+    preferenceRepo : PreferencesRepo,
+    private val appDao: AppDao
 ) : ViewModel() {
     val wsUri = "7509b34df87c47ad8a934836f0109ec8.s2.eu.hivemq.cloud" // Replace with your WebSocket address
     val uid = preferenceRepo.getUserID()
@@ -26,6 +43,71 @@ class MQTTClientViewModel @Inject constructor(
         .serverPort(8883)
         .sslWithDefaultConfig()
         .buildBlocking()
+
+    var selectedDevice by mutableStateOf("")
+    var showDeviceSheet by mutableStateOf(false)
+
+    var moisture by mutableStateOf("")
+    var temperature by mutableStateOf("")
+    var humidity by mutableStateOf("")
+    var waterlevel by mutableStateOf("")
+
+    var isToggled by mutableStateOf(false)
+    var motor by mutableStateOf(false)
+
+    var logout by mutableStateOf(false)
+
+    private val _alerts = appDao.getAlerts()
+        .stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(),
+            emptyList()
+        )
+
+    val _alertState = MutableStateFlow(AlertState())
+
+    val alertState = combine(_alertState, _alerts){ state, alert ->
+        state.copy(
+            alerts = alert
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), AlertState())
+
+    fun onAlertEvent(event: AlertEvent){
+        when(event){
+            AlertEvent.AddAlert -> {
+                val msg = alertState.value.msg
+                val time = alertState.value.time
+
+                if (msg.isBlank()){
+                    Log.e("AlertAddng",msg+" Blank")
+                    return
+                }
+                val alert = Alerts(
+                    message = msg,
+                    time = time
+                )
+                Log.e("AlertAddng",msg+" "+time)
+                viewModelScope.launch {
+                    appDao.addAlert(alert)
+                }
+            }
+            is AlertEvent.DeleteAlert -> {
+                viewModelScope.launch {
+                    appDao.deleteAlert(event.msg)
+                }
+            }
+            is AlertEvent.SetMsg -> {
+                _alertState.update { it.copy(
+                    msg = event.msg
+                ) }
+            }
+            is AlertEvent.SetTime -> {
+                _alertState.update { it.copy(
+                    msg = event.time
+                ) }
+            }
+        }
+    }
 
     fun getUname() : String{
         return sharedPreferences.getUname()
@@ -41,6 +123,7 @@ class MQTTClientViewModel @Inject constructor(
 
     fun Connect(username : String, password : String): Boolean {
         sharedPreferences.setUname(username)
+        sharedPreferences.setPassword(password)
         var status : Boolean = false
         try {
             client.connectWith()
@@ -50,19 +133,6 @@ class MQTTClientViewModel @Inject constructor(
                 .applySimpleAuth()
                 .send()
 
-            client.subscribeWith()
-                .topicFilter("led")
-                .send()
-            client.toAsync().publishes(MqttGlobalPublishFilter.ALL) { publish: Mqtt5Publish ->
-                Log.e(
-                    "Response From NodeMcu",
-                    "Received message: " +
-                            publish.topic + " -> " +
-                            StandardCharsets.UTF_8.decode(
-                                publish.payload.get()
-                            )
-                )
-            }
 
             Log.e("OnConnect","Success ${client.state}")
             status = true
@@ -70,6 +140,174 @@ class MQTTClientViewModel @Inject constructor(
             Log.e("OnConnect",e.message.toString())
         }
         return status
+    }
+
+    fun UnSubscribeToDevice(name : String){
+        try {
+            if (client.state==MqttClientState.CONNECTED){
+                client.unsubscribeWith()
+                    .topicFilter("$name/waterlevel")
+                    .send()
+                client.unsubscribeWith()
+                    .topicFilter("$name/moisture")
+                    .send()
+                client.unsubscribeWith()
+                    .topicFilter("$name/humidity")
+                    .send()
+                client.unsubscribeWith()
+                    .topicFilter("$name/temperature")
+                    .send()
+            }else{
+                client.connectWith()
+                    .simpleAuth()
+                    .username("nodeesp")
+                    .password(StandardCharsets.UTF_8.encode("Password01"))
+                    .applySimpleAuth()
+                    .send()
+                client.unsubscribeWith()
+                    .topicFilter("$name/waterlevel")
+                    .send()
+                client.unsubscribeWith()
+                    .topicFilter("$name/moisture")
+                    .send()
+                client.unsubscribeWith()
+                    .topicFilter("$name/humidity")
+                    .send()
+                client.unsubscribeWith()
+                    .topicFilter("$name/temperature")
+                    .send()
+            }
+
+        } catch (e : Exception){
+            Log.e("Failed","Failed")
+        }
+    }
+
+    fun Logout(){
+        sharedPreferences.setUname("")
+        sharedPreferences.setPassword("")
+        sharedPreferences.setFirst()
+    }
+    fun SubscribeToAlert(){
+        val uname = sharedPreferences.getUname()
+        val password = sharedPreferences.getPassword()
+        try {
+            if (client.state==MqttClientState.CONNECTED){
+                client.subscribeWith()
+                    .topicFilter("alert/deviceMotor")
+                    .send()
+                client.toAsync().publishes(MqttGlobalPublishFilter.ALL) { publish: Mqtt5Publish ->
+                    if (publish.topic.toString() == "alert/deviceMotor"){
+                        val currentTimeMillis = System.currentTimeMillis()
+                        val currentDate = Date(currentTimeMillis)
+                        val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+                        val formattedDate = formatter.format(currentDate)
+                        val alert = Alerts(
+                            message = StandardCharsets.UTF_8.decode(publish.payload.get()).toString(),
+                            time = formattedDate
+                        )
+                        viewModelScope.launch {
+                            appDao.addAlert(alert)
+                        }
+                    }
+                }
+            }else{
+                client.connectWith()
+                    .simpleAuth()
+                    .username(uname)
+                    .password(StandardCharsets.UTF_8.encode(password))
+                    .applySimpleAuth()
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("alert/deviceMotor")
+                    .send()
+                client.toAsync().publishes(MqttGlobalPublishFilter.ALL) { publish: Mqtt5Publish ->
+                    if (publish.topic.toString() == "alert/deviceMotor"){
+                        val currentTimeMillis = System.currentTimeMillis()
+                        val currentDate = Date(currentTimeMillis)
+                        val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+                        val formattedDate = formatter.format(currentDate)
+                        val alert = Alerts(
+                            message = StandardCharsets.UTF_8.decode(publish.payload.get()).toString(),
+                            time = formattedDate
+                        )
+                        viewModelScope.launch {
+                            appDao.addAlert(alert)
+                        }
+                    }
+                }
+            }
+
+        } catch (e : Exception){
+            Log.e("Failed",e.message.toString()+uname+password)
+        }
+    }
+    fun SubscribeToDevice(name : String){
+        val uname = sharedPreferences.getUname()
+        val password = sharedPreferences.getPassword()
+        viewModelScope.launch {
+            motor = appDao.getIsMotorRunning(name)
+        }
+        try {
+            if (client.state==MqttClientState.CONNECTED){
+                client.subscribeWith()
+                    .topicFilter("$name/waterlevel")
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("$name/moisture")
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("$name/humidity")
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("$name/temperature")
+                    .send()
+                client.toAsync().publishes(MqttGlobalPublishFilter.ALL) { publish: Mqtt5Publish ->
+                    when(publish.topic.toString()){
+                        "$name/humidity" -> humidity = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+
+                        "$name/temperature" -> temperature = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+
+                        "$name/moisture" -> moisture = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+
+                        "$name/waterlevel" -> waterlevel = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+                    }
+                }
+            }else{
+                client.connectWith()
+                    .simpleAuth()
+                    .username(uname)
+                    .password(StandardCharsets.UTF_8.encode(password))
+                    .applySimpleAuth()
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("$name/waterlevel")
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("$name/moisture")
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("$name/humidity")
+                    .send()
+                client.subscribeWith()
+                    .topicFilter("$name/temperature")
+                    .send()
+                client.toAsync().publishes(MqttGlobalPublishFilter.ALL) { publish: Mqtt5Publish ->
+                    when(publish.topic.toString()){
+                        "$name/humidity" -> humidity = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+
+                        "$name/temperature" -> temperature = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+
+                        "$name/moisture" -> moisture = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+
+                        "$name/waterlevel" -> waterlevel = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
+                    }
+                }
+            }
+
+        } catch (e : Exception){
+            Log.e("Failed","Failed")
+        }
     }
 
     fun DeviceOn(device : String, status : Boolean ){
@@ -84,6 +322,12 @@ class MQTTClientViewModel @Inject constructor(
                 .payload("0".toByteArray())
                 .send()
         }
+    }
 
+    fun SetMotorStatus(name: String) {
+        motor = !motor
+        viewModelScope.launch {
+            appDao.updateIsMotorRunning(name,motor)
+        }
     }
 }

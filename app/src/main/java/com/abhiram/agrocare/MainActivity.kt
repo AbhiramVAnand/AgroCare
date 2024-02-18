@@ -11,12 +11,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.room.Room
 import com.abhiram.agrocare.data.repository.PreferencesRepo
 import com.abhiram.agrocare.ui.pages.StartUpPage
 import com.abhiram.agrocare.ui.pages.navigation.AppNavHost
 import com.abhiram.agrocare.ui.pages.navigation.Routes
 import com.abhiram.agrocare.ui.theme.AgroCareTheme
 import com.abhiram.agrocare.viewmodels.MQTTClientViewModel
+import com.abhiram.agrocare.viewmodels.RoomViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -30,12 +32,13 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
+
                     val viewModel = hiltViewModel<MQTTClientViewModel>()
                     val isfirst = viewModel.getIsFirst()
                     if (isfirst){
-                        AppNavHost(startDestination = Routes.StartUpPage.route, viewModel =  viewModel)
+                        AppNavHost(startDestination = Routes.StartUpPage.route)
                     }else{
-                        AppNavHost(startDestination = Routes.HomePage.route, viewModel = viewModel)
+                        AppNavHost(startDestination = Routes.HomePage.route)
                     }
 
                 }

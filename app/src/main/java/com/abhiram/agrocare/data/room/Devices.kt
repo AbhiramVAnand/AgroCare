@@ -6,18 +6,21 @@ import androidx.room.PrimaryKey
 import androidx.versionedparcelable.VersionedParcelize
 
 @VersionedParcelize
-@Entity(tableName = "devices")
+@Entity()
 data class Devices(
-    @PrimaryKey(autoGenerate = false)
+
     @ColumnInfo(name = "name")
     var name : String,
 
-    @ColumnInfo(name = "temp")
-    var temp : Int,
-
     @ColumnInfo(name = "moisture")
-    var moisture : Int,
+    var moisture : String,
 
-    @ColumnInfo(name = "water")
-    var water : Int
+    @ColumnInfo(name = "isMotorRunning")
+    var isMotorRunning : Boolean,
+
+    @PrimaryKey(autoGenerate = true)
+    val id : Int = 0
+
+//    @ColumnInfo(name = "water")
+//    var water : Int
 )

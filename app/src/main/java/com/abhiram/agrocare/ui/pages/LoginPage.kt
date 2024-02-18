@@ -44,6 +44,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import com.abhiram.agrocare.R
 import com.abhiram.agrocare.ui.pages.navigation.LocalNavigator
 import com.abhiram.agrocare.ui.pages.navigation.Routes
@@ -57,9 +58,8 @@ import kotlinx.coroutines.launch
 import java.lang.Exception
 
 @Composable
-fun LoginPage(
-    viewModel: MQTTClientViewModel
-) {
+fun LoginPage() {
+    val viewModel = hiltViewModel<MQTTClientViewModel>()
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var isPasswordVisible by remember { mutableStateOf(false) }

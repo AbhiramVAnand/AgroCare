@@ -10,6 +10,7 @@ class PreferencesRepo @Inject constructor(
 ) {
     var sharedPreferences : SharedPreferences
     val USERNAME = "username"
+    val PASSWORD = "password"
     val ISFIRST = "isfirst"
     val UID = "uid"
 
@@ -23,6 +24,14 @@ class PreferencesRepo @Inject constructor(
 
     fun getUname() : String{
         return sharedPreferences.getString(USERNAME,"").toString()
+    }
+
+    fun setPassword(password :String){
+        sharedPreferences.edit().putString(PASSWORD,password).apply()
+    }
+
+    fun getPassword() : String{
+        return sharedPreferences.getString(PASSWORD,"").toString()
     }
 
     fun setUID(uid : String){
@@ -39,6 +48,10 @@ class PreferencesRepo @Inject constructor(
 
     fun setNotFirst(){
         sharedPreferences.edit().putBoolean(ISFIRST,false).apply()
+    }
+
+    fun setFirst() {
+        sharedPreferences.edit().putBoolean(ISFIRST,true).apply()
     }
 
 }

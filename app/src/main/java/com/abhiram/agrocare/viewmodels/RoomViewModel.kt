@@ -1,19 +1,102 @@
 package com.abhiram.agrocare.viewmodels
 
 import androidx.lifecycle.ViewModel
-import com.abhiram.agrocare.data.repository.DeviceRepository
+import androidx.lifecycle.viewModelScope
+import com.abhiram.agrocare.data.room.AlertEvent
+import com.abhiram.agrocare.data.room.AlertState
+import com.abhiram.agrocare.data.room.Alerts
+import com.abhiram.agrocare.data.room.DeviceEvent
+import com.abhiram.agrocare.data.room.DeviceState
 import com.abhiram.agrocare.data.room.Devices
-import dagger.hilt.android.HiltAndroidApp
+import com.abhiram.agrocare.data.room.AppDao
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class RoomViewModel @Inject constructor (private val deviceRepository : DeviceRepository) : ViewModel(){
-    fun addDevice(device : Devices){
-        deviceRepository.addDevice(device)
-    }
+class RoomViewModel @Inject constructor (
+    private val appDao: AppDao
+) : ViewModel(){
 
-    fun getDevices(){
-        deviceRepository.getAllDevice()
+
+    private val _devices = appDao.getDevices()
+        .stateIn(viewModelScope,
+            SharingStarted.WhileSubscribed(),
+            emptyList()
+        )
+
+    val _state = MutableStateFlow(DeviceState())
+
+    val state = combine(_state, _devices){ state, devices ->
+        state.copy(
+            devices = devices
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), DeviceState())
+
+    fun onEvent(event : DeviceEvent){
+        when(event){
+            DeviceEvent.AddDevice -> {
+                val name = state.value.name
+                val plantName = state.value.plantName
+                val moisture = state.value.moisture
+                val motorState = state.value.isMotorRunning
+
+                if (name.isBlank()){
+                    return
+                }
+
+                val device = Devices(
+                    name = name,
+                    moisture = moisture,
+                    isMotorRunning = motorState
+                )
+
+                viewModelScope.launch {
+                    appDao.addDevice(device)
+                }
+                _state.update {it.copy(
+                    isAddingDevice = false
+                ) }
+            }
+
+            DeviceEvent.HideDialog -> {
+                _state.update {it.copy(
+                    isAddingDevice = false
+                ) }
+            }
+
+            is DeviceEvent.SetMoisture -> {
+                _state.update { it.copy(
+                  moisture = event.moisture
+                ) }
+            }
+
+            is DeviceEvent.SetMotorRunning -> {
+                _state.update { it.copy(
+                    isMotorRunning = event.motorStatus
+                ) }
+            }
+            is DeviceEvent.SetName -> {
+                _state.update{it.copy(
+                    name = event.name
+                )}
+            }
+            DeviceEvent.ShowDialog -> {
+                _state.update {it.copy(
+                    isAddingDevice = true
+                ) }
+            }
+
+            is DeviceEvent.DeleteDevice -> {
+                viewModelScope.launch {
+                    appDao.delete(event.device)
+                }
+            }
+        }
     }
 }
